@@ -1,4 +1,4 @@
-# spotify-whatsapp-status
+# spotify-to-whatsapp
 
 Automatically updates your WhatsApp **About status ("thought")** and **classic profile description** (the "About" field on your contact card) with the song currently playing on **Spotify**.
 
