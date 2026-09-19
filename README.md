@@ -1,4 +1,4 @@
-# spotify-to-whatsapp
+# spotify-whatsapp-status
 
 Automatically updates your WhatsApp **About status ("thought")** and **classic profile description** (the "About" field on your contact card) with the song currently playing on **Spotify**.
 
@@ -38,7 +38,8 @@ npm install
   "phone": "393401234567",
   "pairingMode": "code",
   "statusTemplate": "🎵 {title} — {artist}",
-  "idleStatus": "restore",
+  "idleStatus": "",
+  "customDescriptionRestoring": "",
   "restoreOnExit": true,
   "pollSeconds": 10,
   "appFilter": "Spotify"
@@ -50,7 +51,8 @@ npm install
 | `phone` | Your phone number (including country code, digits only). Used only for the pairing code. |
 | `pairingMode` | `"code"` = login via 8-character pairing code (no QR scan needed); `"qr"` = classic QR code scan. |
 | `statusTemplate` | Status text format. Placeholders: `{title}`, `{artist}`, `{album}`, `{app}`. |
-| `idleStatus` | Action when nothing is playing: `"restore"` = revert to the status active before launching (recommended), any custom string = set custom text, `""` = leave status untouched. |
+| `idleStatus` | What to write when nothing is playing (Spotify closed or paused): `""` (empty, **default**) or `"restore"` = restore the description that was set before starting the program; `"none"` = leave the description untouched; any other text = set that text as the description (e.g. `"🎧 Away from streaming"`). |
+| `customDescriptionRestoring` | **Priority override.** If set to a non-empty text, that text is written to BOTH profile fields (status bubble + classic "About" field) whenever nothing is playing AND when the program closes — replacing both `idleStatus` and the restore-on-exit behavior. Empty (default) = the field is ignored, as if it did not exist. The kebab-case alias `custom-description-restoring` is also accepted. |
 | `restoreOnExit` | `true` (default) = upon exiting (Ctrl+C), restore pre-launch statuses. |
 | `classicDescription` | `true` (default) = writes the song **also** to the classic profile description ("About" field, max 139 chars, on contact card), in addition to the status bubble. `false` = status bubble only. Does not touch status stories or chats. |
 | `showAbout` | `true` (default) = displays your description in the terminal when saved/restored. `false` = hide it. |
@@ -70,9 +72,13 @@ On first run:
 
 After initial pairing, your session remains saved: subsequent launches will not prompt for authentication.
 
-When Spotify is paused or closed, your status **automatically reverts to what you had before starting the program** (when using `idleStatus: "restore"`). The same occurs when you terminate the script with `Ctrl+C` (thanks to `restoreOnExit`).
+When Spotify is paused or closed, your status **automatically reverts to what you had before starting the program** (this is the default `idleStatus: ""` behavior; set a custom text in `idleStatus` if you prefer a fixed description while idle). The same happens when you terminate the script (thanks to `restoreOnExit`).
 
-To stop the program: `Ctrl+C`.
+To stop the program: `Ctrl+C`, or simply close the terminal window (X button). On **any** exit path — Ctrl+C, window close, taskkill — the program restores your previous descriptions (both the status bubble and the classic field) before shutting down.
+
+The restore takes a few seconds: **wait for the "restored" log lines** before closing the terminal. A second Ctrl+C forces the exit immediately. If the process is killed before the restore finishes, the texts to restore are saved in `restore-state.json` and the **next start completes the restore automatically** (auto-repair) — so your profile never stays stuck with a song description.
+
+> Tip: launch the app with `start.bat` (or `node src/index.js`). Running it through `npm start` adds a cmd.exe layer that, on Windows, can kill Node during the Ctrl+C restore (the "Terminate batch job (Y/N)?" prompt).
 
 ## Testing
 
@@ -106,6 +112,7 @@ In addition:
 - **"Linked account DOES NOT match"** → The phone number in `config.json` does not match the linked account. Correct `config.json`, or delete the `.wwebjs_auth` folder and re-pair.
 - **Chromium doesn't launch** → The initial run downloads Chromium (may take a few minutes).
 - **"The browser is already running"** → Another instance of the script is already running or hung. Close it before relaunching.
+- **The description stayed on the song after closing** → The process was killed before the restore finished. Just start the app again: it completes the restore automatically (auto-repair), or run `node scripts/restore-about.js "your text"` to set it manually.
 - **Quick manual test** → `node scripts/test-set-about.js` sets a test status, verifies it, and restores the previous description.
 - **About Diagnostics** → `scripts/diag-about*.js`: inspect internal WhatsApp Web modules and test write pathways, verifying text, emoji, and duration server-side. `diag-about11.js` is the key script (GraphQL mutation).
 
@@ -115,4 +122,33 @@ In addition:
 - Description updates rely on [`whatsapp-web.js`](https://wwebjs.dev) (`client.setStatus`) driving WhatsApp Web. This is an unofficial tool: use responsibly (by default, updates occur only when the track changes, not on every poll interval).
 - The classic "About" profile field is written via the internal `WAWebSetAboutJob` (legacy IQ, max 139 characters), with fallback to `client.setStatus`: this is **the exact field** shown on your contact card, distinct from the new timed status bubble. The program **never** touches status updates/stories or chats.
 
-For now (version 1.0), the app is only available in Italian, and for PCs.
+The app is currently Windows-only and available in English only.
+
+## Sharing a Clean Copy
+
+To share the app with someone as if it had never been used, select and zip **only** these items:
+
+```
+spotify-whatsapp-status/
+├── src/                  (all files)
+├── scripts/              (all files)
+├── test/                 (all files)
+├── node_modules/         (optional: can be regenerated with `npm install`)
+├── .gitignore
+├── config.example.json
+├── installation.bat
+├── package.json
+├── package-lock.json
+├── README.md
+└── start.bat
+```
+
+**Do NOT include** these (they contain personal data or are machine-specific):
+
+- `config.json` — contains the real phone number;
+- `.wwebjs_auth/` — contains the WhatsApp session bound to your account (whoever has it could use your WhatsApp);
+- `.wwebjs_cache/` — WhatsApp Web cache;
+- `restore-state.json` — pending-restore state (profile description texts);
+- `app.log`, `app.err`, `app.lock`, `smoke2.log` — runtime logs and lock file.
+
+The recipient copies `config.example.json` to `config.json`, enters their own phone number, and runs `npm install` (or `installation.bat`) if `node_modules/` was not included.
