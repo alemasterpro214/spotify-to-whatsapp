@@ -1,8 +1,9 @@
-# spotify-whatsapp-status (Latest version)
+# spotify-to-whatsapp
 
 Automatically updates your WhatsApp **About status ("thought")** and **classic profile description** (the "About" field on your contact card) with the song currently playing on **Spotify**.
 
 > ⚠️ **Windows only** (reads the currently playing track through the Windows SMTC API, available on Windows 10/11 — including Tiny11 and LTSC 10 — and in "background" mode also on Windows 8.1/8/7/Vista, where Spotify track reading is not available to apps).
+
 
 ## Highlights
 
@@ -12,6 +13,7 @@ Automatically updates your WhatsApp **About status ("thought")** and **classic p
   - `run-hidden.vbs` — **no terminal window at all**: a **tray icon** appears in the "Show hidden icons" area; click it to open the status window.
 - **Start with Windows** button in the tray UI (asks for administrator permission once, so the entry also appears in Task Manager → Startup apps; removable from the app itself or from Task Manager).
 - **Background running** option: when enabled, closing the window (or having no window at all) does NOT stop the app — it keeps running in the tray until you quit it from the tray UI ("Quit and restore").
+- **Change the language at any time**: press **[K]** in the console window, or use the **Language** button in the tray window. The new language applies immediately (menu, logs) and is remembered.
 
 ## How it works
 
@@ -93,7 +95,11 @@ After initial pairing, your session remains saved: subsequent launches will not 
 
 A live **HUD dashboard** shows: WhatsApp connection state, login mode, polling interval, filters, current track with playback state, last update time and the rolling log. It redraws in place using ANSI/VT sequences. On consoles that do not support them the HUD quietly disables itself and the output is the classic timestamped log — never garbage characters.
 
-Exit with **Ctrl+C**: the previous descriptions are restored before the process ends.
+Keyboard shortcuts:
+- **Ctrl+C** — stop the app (previous descriptions are restored first);
+- **[K]** — open the language menu and switch language instantly.
+
+While the [K] language menu is open the HUD pauses (so nothing is drawn over it); confirm your choice with Enter and the HUD comes back in the new language.
 
 ### Hidden mode (`run-hidden.vbs`)
 
@@ -102,8 +108,10 @@ No terminal window is ever opened. A **tray icon** (green WhatsApp-style dot wit
 - connection state and current track;
 - **Start with Windows** — asks for administrator permission (UAC) once and registers the autostart entry in `HKLM\...\CurrentVersion\Run` with the hidden launcher. Entries in HKLM are exactly what **Task Manager → Startup apps** lists, so you can remove it from there, or just untick the checkbox in the app (which asks for permission again). Changing it never requires editing the registry by hand.
 - **Background running** — keeps the app alive when the status window (or its whole host) is closed; the only way to stop it is the tray UI.
-- **Open log** — opens `app.log` / `app.err` in Notepad;
+- **Language** — opens the language picker (same 11 languages); the new language applies immediately;
 - **Quit and restore** — asks for confirmation, then restores your previous descriptions and exits completely (tray icon included).
+
+The log files (`app.log`, `app.err`) are in the project folder and can be opened with any text editor.
 
 Pairing, language choice and setup errors are shown as native windows in the selected language, so everything is usable without any console.
 
@@ -169,7 +177,7 @@ In addition:
 To share the app with someone as if it had never been used, select and zip **only** these items:
 
 ```
-spotify-whatsapp-status/
+spotify-to-whatsapp/
 ├── src/                  (all files, including locales/)
 ├── scripts/              (all files)
 ├── test/                 (all files)
@@ -193,5 +201,4 @@ spotify-whatsapp-status/
 - `.ui-language` — language preference (trivial, but the recipient should choose their own);
 - `.tray-status`, `.tray-command` — tray runtime files;
 - `app.log`, `app.err`, `app.lock`, `smoke2.log` — runtime logs and lock file.
-
 The recipient copies `config.example.json` to `config.json`, enters their own phone number, and runs `npm install` (or `installation.bat`) if `node_modules/` was not included.
