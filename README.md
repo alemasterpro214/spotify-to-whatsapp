@@ -40,7 +40,13 @@ Requires [Node.js](https://nodejs.org) 18 or higher.
 npm install
 ```
 
-or run `installation.bat`.
+or run `installation.bat`, which in one go:
+
+1. checks for Node.js 18+;
+2. if **no browser is installed**, installs **Google Chrome** and **Chromium** automatically (via `winget`; if winget is unavailable or fails, it downloads a portable Chromium into the project's `chromium/` folder);
+3. installs the npm dependencies.
+
+Any Chromium-based browser works (Chrome, Chromium, Edge, Brave, Vivaldi, Opera): the app **detects one automatically at startup** and only falls back to the Chromium bundled with Puppeteer when nothing else is available, so it keeps working with any future browser version.
 
 ## First launch
 
@@ -87,6 +93,7 @@ After initial pairing, your session remains saved: subsequent launches will not 
 | `showAbout` | `true` (default) = displays your description in the terminal when saved/restored. `false` = hide it. |
 | `pollSeconds` | Polling interval in seconds to check playing media (min 5, max 600). |
 | `appFilter` | Only reads media sessions matching this string (`"Spotify"`). Empty `""` = any media app. |
+| `chromePath` | Optional explicit path to the browser executable for WhatsApp Web (e.g. `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"`). Empty (default) = automatic detection: `PUPPETEER_EXECUTABLE_PATH` / `CHROME_PATH` env vars → the project `chromium/` folder → any installed Chromium-based browser → the Chromium bundled with Puppeteer. |
 | `backgroundRunning` | `false` (default) = closing the window quits the app (after restoring). `true` = the app keeps running when the window is closed; stop it from the tray icon ("Quit and restore"). This toggle can also be changed live from the tray UI. |
 
 ## The two launch modes
@@ -156,7 +163,7 @@ In addition:
 - **"No active media session"** → Spotify must be playing (not paused) and visible in the Windows Media Control panel.
 - **Pairing code doesn't work** → Codes expire after a few minutes; restart the app to generate a new code. Ensure `phone` is correctly formatted with country code.
 - **"Linked account DOES NOT match"** → The phone number in `config.json` does not match the linked account. Correct `config.json`, or delete the `.wwebjs_auth` folder and re-pair.
-- **Chromium doesn't launch** → The initial run downloads Chromium (may take a few minutes).
+- **Chromium doesn't launch** → The initial run downloads Chromium (may take a few minutes). If `chromePath` is set in config.json, check that the file exists and points to a browser executable.
 - **"The browser is already running"** → Another instance of the script is already running or hung. Close it before relaunching.
 - **The description stayed on the song after closing** → The process was killed before the restore finished. Just start the app again: it completes the restore automatically (auto-repair), or run `node scripts/restore-about.js "your text"` to set it manually.
 - **Quick manual test** → `node scripts/test-set-about.js` sets a test status, verifies it, and restores the previous description.
@@ -168,20 +175,20 @@ In addition:
 
 - Track reading uses `GlobalSystemMediaTransportControlsSessionManager` (SMTC) via PowerShell 5.1-compatible syntax: no native binary compilation required.
 - The tray host is a WinForms `NotifyIcon` in a hidden PowerShell process; Node ↔ tray communication happens through two small local files with URL-encoded key=value lines (PowerShell 2.0-compatible, no JSON dependency).
+- **Browser for WhatsApp Web**: launched by explicit path — config `chromePath`, `PUPPETEER_EXECUTABLE_PATH`/`CHROME_PATH`, the portable Chromium in `chromium/` (installed by `installation.bat` when no browser exists), or any installed Chromium-based browser (Chrome, Chromium, Edge, Brave, Vivaldi, Opera). Only when none of these exists is Puppeteer's own bundled Chromium used. This decouples the app from future Puppeteer/Chrome release changes.
 - Description updates rely on [`whatsapp-web.js`](https://wwebjs.dev) (`client.setStatus`) driving WhatsApp Web. This is an unofficial tool: use responsibly (by default, updates occur only when the track changes, not on every poll interval).
 - The classic "About" profile field is written via the internal `WAWebSetAboutJob` (legacy IQ, max 139 characters), with fallback to `client.setStatus`: this is **the exact field** shown on your contact card, distinct from the new timed status bubble. The program **never** touches status updates/stories or chats.
 - Translations live in `src/locales/*.js`; every locale is checked against the English key set by the unit tests, so a missing string can never produce broken output.
 
 ## Sharing a Clean Copy
 
-To share the app with someone as if it had never been used, select and zip **only** these items:
+To share the app with someone as if it had never been used, run `npm run make-zip`: it creates `spotify-to-whatsapp.zip` in the project folder containing **exactly** these items (private/runtime files are refused by design, and the generated zip is gitignored):
 
-```
+```text
 spotify-to-whatsapp/
 ├── src/                  (all files, including locales/)
 ├── scripts/              (all files)
 ├── test/                 (all files)
-├── node_modules/         (optional: can be regenerated with `npm install`)
 ├── .gitignore
 ├── config.example.json
 ├── installation.bat
@@ -192,6 +199,8 @@ spotify-to-whatsapp/
 └── start.bat
 ```
 
+The zip is ready to attach to a chat or to upload to GitHub (upload/extract it into a new repository — `node_modules/` is intentionally excluded and is rebuilt by `installation.bat` on the recipient's machine).
+
 **Do NOT include** these (they contain personal data or are machine-specific):
 
 - `config.json` — contains the real phone number;
@@ -201,4 +210,5 @@ spotify-to-whatsapp/
 - `.ui-language` — language preference (trivial, but the recipient should choose their own);
 - `.tray-status`, `.tray-command` — tray runtime files;
 - `app.log`, `app.err`, `app.lock`, `smoke2.log` — runtime logs and lock file.
+
 The recipient copies `config.example.json` to `config.json`, enters their own phone number, and runs `npm install` (or `installation.bat`) if `node_modules/` was not included.
