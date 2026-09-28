@@ -1,214 +1,255 @@
 # spotify-to-whatsapp
 
-Automatically updates your WhatsApp **About status ("thought")** and **classic profile description** (the "About" field on your contact card) with the song currently playing on **Spotify**.
+Automatically shows **the song you are listening to on Spotify** in your
+**WhatsApp status (About)** and, optionally, in your **classic profile
+description** — in two builds that do the same thing on two different systems:
 
-> ⚠️ **Windows only** (reads the currently playing track through the Windows SMTC API, available on Windows 10/11 — including Tiny11 and LTSC 10 — and in "background" mode also on Windows 8.1/8/7/Vista, where Spotify track reading is not available to apps).
+| | **Windows** (`for pc/`) | **Android** (`for android/`) |
+|---|---|---|
+| Language / stack | Node.js 18+ (JavaScript) | Kotlin (native, no runtime deps) |
+| Ship as | `spotify-to-whatsapp.zip` — ready for GitHub | `spotify-to-whatsapp-android.apk` — ready to install |
+| Reads the track from | Windows SMTC API (PowerShell) | Android media session (`NotificationListenerService`) |
+| Talks to WhatsApp via | WhatsApp Web driven by `whatsapp-web.js` (Chromium) | WhatsApp Web hosted in an in-app WebView |
+| Pairing code (8 digits) | ✅ | ✅ (WhatsApp's own "Link with phone number" screen) |
+| Start with the system | ✅ Task Manager → Startup apps | ✅ Starts at phone boot |
+| Sensitive data encrypted at rest | ✅ Phone number + WhatsApp session (DPAPI + AES-256-GCM) | ✅ Settings + restore state (Android Keystore + AES-256-GCM) |
+| ADB / root / special access required | ❌ | ❌ |
+| UI languages | 11 (console + tray UI) | English + Italiano (follows the phone) |
+| Background running | Tray icon / hidden mode | Foreground service (`specialUse`) + boot receiver |
 
+Both builds share the same idea and the same WhatsApp internals, and both restore
+your previous description when playback stops or when you quit.
 
-## Highlights
+---
 
-- **11 languages**: English, Italiano, 中文, Deutsch, Español, Русский, 日本語, हिन्दी, Français, 한국어, العربية. The **first time the app starts, it asks for your language before doing anything else** — with native names (中文, العربية, ...), so the prompt is understandable no matter which language you speak. The choice is remembered; the app is fully translated (logs, pairing screens, tray UI).
-- **Two launch modes**:
-  - `start.bat` — visible console with a **live HUD** (WhatsApp status, current track, log tail) on Windows 10/11 terminals;
-  - `run-hidden.vbs` — **no terminal window at all**: a **tray icon** appears in the "Show hidden icons" area; click it to open the status window.
-- **Start with Windows** button in the tray UI (asks for administrator permission once, so the entry also appears in Task Manager → Startup apps; removable from the app itself or from Task Manager).
-- **Background running** option: when enabled, closing the window (or having no window at all) does NOT stop the app — it keeps running in the tray until you quit it from the tray UI ("Quit and restore").
-- **Change the language at any time**: press **[K]** in the console window, or use the **Language** button in the tray window. The new language applies immediately (menu, logs) and is remembered.
+## 1. Repository layout
 
-## How it works
-
-1. A small PowerShell script queries **Windows** and reads the currently playing track from Spotify (title, artist, album, state).
-2. The program updates **two areas of your WhatsApp profile** whenever the song changes:
-   - the **temporary status bubble** ("About" / thought);
-   - the **classic profile description** ("About" field, max 139 characters, visible on your contact card) — can be enabled/disabled with `classicDescription`.
-3. When Spotify stops playing (or when you exit the program), **both previous descriptions are automatically restored**, each back to its original text.
-4. Everything happens **locally on your PC**: track reading does not send any data to remote servers.
-
-## Privacy (Important)
-
-- The **phone number** in `config.json` is **only** used to request the WhatsApp pairing code (QR-less login). It is never printed in logs: if it appears in an error message, it is sanitized as `[number removed]`.
-- The **WhatsApp session** is saved locally in `.wwebjs_auth/` (project folder). No data is sent to third-party servers.
-- The program **does not read chats, contacts, or messages**: it uses WhatsApp Web strictly to update your profile description/status.
-- `config.json` and `.wwebjs_auth/` are included in `.gitignore`: they will never be committed or shared.
-- The chosen language and tray UI state are stored locally (`.ui-language`) and are also gitignored.
-
-## Installation
-
-Requires [Node.js](https://nodejs.org) 18 or higher.
-
-```bash
-npm install
+```
+spotify-to-whatsapp-developing/
+├── README.md                        ← this file
+├── for pc/                          Windows build (Node.js)
+│   ├── spotify-to-whatsapp.zip      clean, shareable, GitHub-ready archive
+│   ├── src/                         source (config, formatting, encryption, UI, WhatsApp)
+│   ├── scripts/                     helpers (media reader, tray host, DPAPI, vault CLI, smoke tests)
+│   ├── test/                        unit tests (89)
+│   ├── config.example.json
+│   ├── installation.bat             one-click setup
+│   ├── start.bat                    visible console (HUD)
+│   └── run-hidden.vbs               no window, tray icon
+└── for android/                     Android build (Kotlin)
+    ├── spotify-to-whatsapp-android.apk   ready to install
+    ├── app/                         the Android project
+    ├── build-apk.sh                 one command to rebuild the APK
+    └── README.md                    Android-specific documentation
 ```
 
-or run `installation.bat`, which in one go:
+The two folders are independent: you can copy just one of them.
 
-1. checks for Node.js 18+;
-2. if **no browser is installed**, installs **Google Chrome** and **Chromium** automatically (via `winget`; if winget is unavailable or fails, it downloads a portable Chromium into the project's `chromium/` folder);
-3. installs the npm dependencies.
+---
 
-Any Chromium-based browser works (Chrome, Chromium, Edge, Brave, Vivaldi, Opera): the app **detects one automatically at startup** and only falls back to the Chromium bundled with Puppeteer when nothing else is available, so it keeps working with any future browser version.
+## 2. What it does
 
-## First launch
+1. It reads the track that **Spotify** (or any media app you point it at) is
+   currently playing — title, artist, album, playback state.
+2. It formats it with your template, by default `🎵 {title} — {artist}`.
+3. It writes the result to **two independent fields of your own WhatsApp
+   profile**:
+   - the **timed status** ("About" bubble), max 50 characters, written with a
+     7-day duration so it actually appears on phones;
+   - the **classic profile description** ("About" on your contact card), max
+     139 characters — can be switched off.
+4. When Spotify stops (or when you quit the app), **both previous values are put
+   back** exactly as they were, each into its own field.
+5. While it runs, the status is **re-asserted every 12 hours** so it never
+   expires, and it is re-written on every track change.
 
-1. Copy `config.example.json` to `config.json` and enter your phone number (international format, digits only — see the table below).
-2. Start the app:
-   - double-click **`run-hidden.vbs`** for the hidden mode (recommended: no window, tray icon), or
-   - run **`start.bat`** for the visible console (HUD).
-3. **On the very first run the app asks for your language before anything else**:
-   - in the console mode you type a number or a code (`en`, `it`, `zh`, ...);
-   - in the hidden mode the same picker opens as a native window from the tray icon.
-4. Then follow the WhatsApp pairing instructions shown in the window/console (pairing code or QR).
+It never touches status stories, chats, contacts or messages.
 
-After initial pairing, your session remains saved: subsequent launches will not prompt for authentication.
+---
 
-## Configuration
+## 3. Privacy and encryption (both builds)
 
-```json
-{
-  "phone": "393401234567",
-  "language": "",
-  "pairingMode": "code",
-  "statusTemplate": "🎵 {title} — {artist}",
-  "idleStatus": "",
-  "customDescriptionRestoring": "",
-  "restoreOnExit": true,
-  "classicDescription": true,
-  "showAbout": true,
-  "pollSeconds": 10,
-  "appFilter": "Spotify",
-  "backgroundRunning": false
-}
+This was a hard requirement, and it is implemented in both versions.
+
+### Nothing personal leaves the machine/phone
+
+- The only outbound network traffic is the one WhatsApp itself needs. No
+  analytics, no telemetry, no crash reporting, no third-party SDK, no QR relay.
+- On Android, cleartext HTTP is refused at platform level; the APK has **zero
+  runtime dependencies**.
+- On Windows the browser used for WhatsApp Web is launched by explicit path, and
+  the app has no dependency that phones home.
+- Logs never contain your number: any run of 6+ digits is rewritten as
+  `[number removed]`. On Android the log is **in memory only** — nothing is
+  written to disk at all.
+
+### Encrypted at rest
+
+| | Windows | Android |
+|---|---|---|
+| Cipher | AES-256-GCM (authenticated) | AES-256-GCM (authenticated) |
+| Key | 256-bit master key in `.secrets/master.key`, wrapped with the **Windows Data Protection API** (DPAPI, current user) so it can only be unwrapped by *your* Windows account on *your* machine | 256-bit AES key generated **inside the Android Keystore**, non-exportable (hardware-backed where the device supports it) |
+| Phone number | stored as `"phone": "enc:v1:…"` in `config.json` after the first run | inside the encrypted settings blob |
+| WhatsApp session | `.wwebjs_auth` is stored as `<name>.enc` and decrypted only while the app runs; re-encrypted on exit, with auto-repair if the process is killed | kept in the app's **private** storage; cloud backup and device transfer are disabled |
+| Backup | – | `allowBackup="false"` + `data_extraction_rules.xml` exclude every domain |
+
+**Honest limits** (documented in both READMEs): while an app is *running* the
+session has to be readable — encryption protects the data **at rest** (files you
+copy, sync, back up or lose), not the memory of a process that malware already
+controls. On Android, Chromium's own WebView storage is not individually
+encrypted; it is protected by the app sandbox and by the disabled backup.
+
+---
+
+## 4. Windows version — quick start
+
+```text
+1. Install Node.js 18+  (https://nodejs.org)
+2. Run  installation.bat          (checks Node, installs a browser if needed, installs deps)
+3. Run  npm run make-zip          → spotify-to-whatsapp.zip  (optional, for sharing)
+4. Copy  config.example.json  →  config.json  and put your phone number in "phone"
+5. Double-click  run-hidden.vbs   (tray icon, no window)   or  start.bat  (visible console)
+6. Follow the pairing instructions (8-digit code or QR)
 ```
 
-| Field | Description |
-|---|---|
-| `phone` | Your phone number (including country code, digits only). Used only for the pairing code. |
-| `language` | UI language: `en`, `it`, `zh`, `de`, `es`, `ru`, `ja`, `hi`, `fr`, `ko`, `ar`. Empty (default) = the choice made on first run (stored in `.ui-language`). This field has the highest priority. |
-| `pairingMode` | `"code"` = login via 8-character pairing code (no QR scan needed); `"qr"` = classic QR code scan. |
-| `statusTemplate` | Status text format. Placeholders: `{title}`, `{artist}`, `{album}`, `{app}`. |
-| `idleStatus` | What to write when nothing is playing (Spotify closed or paused): `""` (empty, **default**) or `"restore"` = restore the description that was set before starting the program; `"none"` = leave the description untouched; any other text = set that text as the description (e.g. `"🎧 Away from streaming"`). |
-| `customDescriptionRestoring` | **Priority override.** If set to a non-empty text, that text is written to BOTH profile fields (status bubble + classic "About" field) whenever nothing is playing AND when the program closes — replacing both `idleStatus` and the restore-on-exit behavior. Empty (default) = the field is ignored, as if it did not exist. The kebab-case alias `custom-description-restoring` is also accepted. |
-| `restoreOnExit` | `true` (default) = upon exiting (Ctrl+C, tray Quit), restore pre-launch statuses. |
-| `classicDescription` | `true` (default) = writes the song **also** to the classic profile description ("About" field, max 139 chars, on contact card), in addition to the status bubble. `false` = status bubble only. Does not touch status stories or chats. |
-| `showAbout` | `true` (default) = displays your description in the terminal when saved/restored. `false` = hide it. |
-| `pollSeconds` | Polling interval in seconds to check playing media (min 5, max 600). |
-| `appFilter` | Only reads media sessions matching this string (`"Spotify"`). Empty `""` = any media app. |
-| `chromePath` | Optional explicit path to the browser executable for WhatsApp Web (e.g. `"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"`). Empty (default) = automatic detection: `PUPPETEER_EXECUTABLE_PATH` / `CHROME_PATH` env vars → the project `chromium/` folder → any installed Chromium-based browser → the Chromium bundled with Puppeteer. |
-| `backgroundRunning` | `false` (default) = closing the window quits the app (after restoring). `true` = the app keeps running when the window is closed; stop it from the tray icon ("Quit and restore"). This toggle can also be changed live from the tray UI. |
+The first launch asks for your language before doing anything else (11 languages,
+shown with their native names). After pairing, the session is remembered.
 
-## The two launch modes
+Full documentation, all configuration fields, the HUD/tray UI and the Windows
+compatibility matrix are in **[`for pc/README.md`](for%20pc/README.md)**.
 
-### Visible console (`start.bat`)
+### The shareable archive
 
-A live **HUD dashboard** shows: WhatsApp connection state, login mode, polling interval, filters, current track with playback state, last update time and the rolling log. It redraws in place using ANSI/VT sequences. On consoles that do not support them the HUD quietly disables itself and the output is the classic timestamped log — never garbage characters.
+`for pc/spotify-to-whatsapp.zip` is generated by `npm run make-zip` and contains
+**only** what a new user needs. The generator *refuses* to include anything
+private, and the following are hard-coded as forbidden:
 
-Keyboard shortcuts:
-- **Ctrl+C** — stop the app (previous descriptions are restored first);
-- **[K]** — open the language menu and switch language instantly.
+`config.json` (the phone number) · `.wwebjs_auth` and `*.enc` (the WhatsApp
+session) · `.secrets` (the encryption key) · `.wwebjs_cache` ·
+`restore-state.json` · `.ui-language` · `.tray-*` · `app.log` · `app.err` ·
+`app.lock` · `node_modules` · `chromium`
 
-While the [K] language menu is open the HUD pauses (so nothing is drawn over it); confirm your choice with Enter and the HUD comes back in the new language.
+So the zip is safe to attach to a chat or to upload to GitHub as-is. The
+recipient runs `installation.bat`, copies `config.example.json` to `config.json`
+and types their own number.
 
-### Hidden mode (`run-hidden.vbs`)
+---
 
-No terminal window is ever opened. A **tray icon** (green WhatsApp-style dot with a music note) appears in the notification area ("Show hidden icons" — you can drag it out of the overflow to pin it). Clicking the icon opens the status window with:
+## 5. Android version — quick start
 
-- connection state and current track;
-- **Start with Windows** — asks for administrator permission (UAC) once and registers the autostart entry in `HKLM\...\CurrentVersion\Run` with the hidden launcher. Entries in HKLM are exactly what **Task Manager → Startup apps** lists, so you can remove it from there, or just untick the checkbox in the app (which asks for permission again). Changing it never requires editing the registry by hand.
-- **Background running** — keeps the app alive when the status window (or its whole host) is closed; the only way to stop it is the tray UI.
-- **Language** — opens the language picker (same 11 languages); the new language applies immediately;
-- **Quit and restore** — asks for confirmation, then restores your previous descriptions and exits completely (tray icon included).
+```text
+1. Copy  for android/spotify-to-whatsapp-android.apk  to the phone and tap it
+2. Open the app; it shows four steps, one button each:
+     1. Open notification access      (Settings → Notification access)
+     2. Open WhatsApp linking         (WhatsApp's own page, inside the app —
+                                       use "Link with phone number instead", or the QR)
+     3. Start at boot                 (already automatic on most phones)
+     4. Allow background running      (system dialog)
+3. Press Start.
+```
 
-The log files (`app.log`, `app.err`) are in the project folder and can be opened with any text editor.
+On Xiaomi/Redmi/POCO (MIUI/HyperOS) and on other phones with their own autostart
+manager, steps 1 and 3 need one extra switch in the phone's settings: without it
+the phone refuses to start the song reader (and the boot start), so the status
+would stay on the idle text. The app notices it, says so in red on step 1 and
+step 3, and its button opens the right screen.
 
-Pairing, language choice and setup errors are shown as native windows in the selected language, so everything is usable without any console.
+No ADB, no root, no restricted-setting unlock: every step is a normal Settings
+screen or a standard system dialog. The APK requests exactly five permissions and
+nothing else — you can verify with
+`aapt2 dump badging spotify-to-whatsapp-android.apk`.
 
-If the main process dies unexpectedly, the tray host detects it and closes itself (no orphaned icons).
+Full documentation (architecture, permission table, why a WebView, troubleshooting)
+is in **[`for android/README.md`](for%20android/README.md)**.
 
-## Windows compatibility
-
-| Windows | Track reading (SMTC) | Console HUD | Hidden mode + tray UI |
-|---|---|---|---|
-| 11 / 10 / Tiny11 / LTSC 10 | ✅ | ✅ | ✅ |
-| 8.1 / 8 / 7 / Vista | ❌ (system limitation) | ❌ (plain logs instead) | ✅ (app runs, tray UI works) |
-
-On Windows 8.1/8/7/Vista the app starts normally and the tray UI works, but the system does not expose media information to apps, so no track can be detected (the log explains it). PowerShell is required for the media reader and the tray host (Windows PowerShell 2.0+ is sufficient: the tray host and the autostart helper avoid features newer than that).
-
-## Testing
+Rebuild it with one command:
 
 ```bash
-npm test            # unit tests (config, formatting, privacy, i18n, HUD, tray codec)
-npm run test:media # actually reads Windows media sessions
+cd "for android" && bash build-apk.sh
+```
+
+---
+
+## 6. Testing
+
+Both builds ship a real, runnable test suite — nothing is claimed that has not
+been executed.
+
+### Windows
+
+```bash
+cd "for pc"
+npm test            # 89 unit tests (config, formatting, privacy, encryption, i18n, HUD, tray)
+npm run test:secure # encryption smoke test: REAL DPAPI key + vault lock/unlock in a temp folder
+npm run test:media  # reads the live Windows media sessions (play something on Spotify first)
 npm run test:whatsapp
 ```
 
-`test:media` displays detected media sessions and the status that would be set: **open Spotify and start playing a track** before running it. `test:whatsapp` verifies the WhatsApp Web connection without altering your profile (exits with code 2 if you do not complete pairing within the timeout, which is expected behavior).
-
-## Description Visibility ("Empty About" Fix)
-
-Since late 2025, WhatsApp converted the About section into a **temporary status**: each status contains text (max 50 characters), an optional emoji, and a **duration** (1h, 8h, 1d, 2d, 1 week). Mobile apps display the status bubble **only if a valid duration is set**: without a duration, the text remains stored on the server but **never appears** (the root cause of the classic "empty About" bug).
-
-Legacy methods (`client.setStatus` from the library and the old IQ `sendSetAbout`) update the legacy field **without duration**, which is why the text failed to appear on phones.
-
-This program uses the **GraphQL mutation** `WAWebMexUpdateTextStatusJob.mexUpdateTextStatus`, the same internal pathway used by WhatsApp Web and mobile apps: it sets **text, emoji, and duration (7 days)** in a single request, ensuring the bubble is **visible in the mobile app**. Reading the description also uses the new GraphQL fetch approach, ensuring that restoration accurately captures the exact text displayed on phones.
-
-In addition:
-- if a song remains static for hours, the description is **automatically re-asserted every 12 hours** so it never expires while the application is running;
-- if the template exceeds the 50-character limit of the new About status, the text is **automatically truncated**;
-- with `classicDescription: true`, the **same text** is also written to the classic "About" field (truncated to 139 characters): the status bubble and classic field are **two distinct server-side fields** and are updated/restored independently.
-
-> Note: Application logs will alert you if a status was set using a fallback method (in which case it might not appear on mobile devices).
-
-## Troubleshooting
-
-- **"No active media session"** → Spotify must be playing (not paused) and visible in the Windows Media Control panel.
-- **Pairing code doesn't work** → Codes expire after a few minutes; restart the app to generate a new code. Ensure `phone` is correctly formatted with country code.
-- **"Linked account DOES NOT match"** → The phone number in `config.json` does not match the linked account. Correct `config.json`, or delete the `.wwebjs_auth` folder and re-pair.
-- **Chromium doesn't launch** → The initial run downloads Chromium (may take a few minutes). If `chromePath` is set in config.json, check that the file exists and points to a browser executable.
-- **"The browser is already running"** → Another instance of the script is already running or hung. Close it before relaunching.
-- **The description stayed on the song after closing** → The process was killed before the restore finished. Just start the app again: it completes the restore automatically (auto-repair), or run `node scripts/restore-about.js "your text"` to set it manually.
-- **Quick manual test** → `node scripts/test-set-about.js` sets a test status, verifies it, and restores the previous description.
-- **About Diagnostics** → `scripts/diag-about*.js`: inspect internal WhatsApp Web modules and test write pathways, verifying text, emoji, and duration server-side. `diag-about11.js` is the key script (GraphQL mutation).
-- **Wrong language** → set `"language": "en"` (or any other code) in `config.json`, or delete the `.ui-language` file to be asked again on the next start.
-- **The tray icon did not appear** → PowerShell must be available (it is on every Windows installation). The app keeps running hidden anyway; check `app.err` for details.
-
-## Technical Notes
-
-- Track reading uses `GlobalSystemMediaTransportControlsSessionManager` (SMTC) via PowerShell 5.1-compatible syntax: no native binary compilation required.
-- The tray host is a WinForms `NotifyIcon` in a hidden PowerShell process; Node ↔ tray communication happens through two small local files with URL-encoded key=value lines (PowerShell 2.0-compatible, no JSON dependency).
-- **Browser for WhatsApp Web**: launched by explicit path — config `chromePath`, `PUPPETEER_EXECUTABLE_PATH`/`CHROME_PATH`, the portable Chromium in `chromium/` (installed by `installation.bat` when no browser exists), or any installed Chromium-based browser (Chrome, Chromium, Edge, Brave, Vivaldi, Opera). Only when none of these exists is Puppeteer's own bundled Chromium used. This decouples the app from future Puppeteer/Chrome release changes.
-- Description updates rely on [`whatsapp-web.js`](https://wwebjs.dev) (`client.setStatus`) driving WhatsApp Web. This is an unofficial tool: use responsibly (by default, updates occur only when the track changes, not on every poll interval).
-- The classic "About" profile field is written via the internal `WAWebSetAboutJob` (legacy IQ, max 139 characters), with fallback to `client.setStatus`: this is **the exact field** shown on your contact card, distinct from the new timed status bubble. The program **never** touches status updates/stories or chats.
-- Translations live in `src/locales/*.js`; every locale is checked against the English key set by the unit tests, so a missing string can never produce broken output.
-
-## Sharing a Clean Copy
-
-To share the app with someone as if it had never been used, run `npm run make-zip`: it creates `spotify-to-whatsapp.zip` in the project folder containing **exactly** these items (private/runtime files are refused by design, and the generated zip is gitignored):
+Expected output of the two suites that need no Spotify account:
 
 ```text
-spotify-to-whatsapp/
-├── src/                  (all files, including locales/)
-├── scripts/              (all files)
-├── test/                 (all files)
-├── .gitignore
-├── config.example.json
-├── installation.bat
-├── package.json
-├── package-lock.json
-├── README.md
-├── run-hidden.vbs
-└── start.bat
+tests 89 / pass 89 / fail 0
+RESULT: all encryption smoke checks passed.
 ```
 
-The zip is ready to attach to a chat or to upload to GitHub (upload/extract it into a new repository — `node_modules/` is intentionally excluded and is rebuilt by `installation.bat` on the recipient's machine).
+`test:secure` is worth reading: it creates a throwaway folder, wraps a real key
+with DPAPI, encrypts a fake session and a config, then checks that **no plaintext
+phone number or session content is left anywhere on disk**.
 
-**Do NOT include** these (they contain personal data or are machine-specific):
+### Android
 
-- `config.json` — contains the real phone number;
-- `.wwebjs_auth/` — contains the WhatsApp session bound to your account (whoever has it could use your WhatsApp);
-- `.wwebjs_cache/` — WhatsApp Web cache;
-- `restore-state.json` — pending-restore state (profile description texts);
-- `.ui-language` — language preference (trivial, but the recipient should choose their own);
-- `.tray-status`, `.tray-command` — tray runtime files;
-- `app.log`, `app.err`, `app.lock`, `smoke2.log` — runtime logs and lock file.
+```bash
+cd "for android"
+bash build-apk.sh tests    # 15 JVM unit tests for the shared logic (formatting, limits, filtering, log sanitising)
+```
 
-The recipient copies `config.example.json` to `config.json`, enters their own phone number, and runs `npm install` (or `installation.bat`) if `node_modules/` was not included.
+The tests assert the same behaviour as the Windows formatter (same placeholders,
+same 50/139-character limits, same "a playing session wins" rule), so the two
+implementations cannot drift apart silently.
+
+---
+
+## 7. How the two builds talk to WhatsApp
+
+Both use **WhatsApp Web as a linked device** — the only supported way to change
+your own profile programmatically. The difference is the host:
+
+- **Windows** launches Chromium through `whatsapp-web.js`, and the program injects
+  calls to WhatsApp Web's internal modules.
+- **Android** hosts WhatsApp's own web client inside an in-app `WebView` and
+  injects the *same* internal calls.
+
+The internal calls, in order of preference, are:
+
+1. `WAWebMexUpdateTextStatusJob.mexUpdateTextStatus(text, emoji, duration)` —
+   the GraphQL mutation WhatsApp Web itself uses. It sets text, emoji and
+   duration in one request, which is what makes the status actually **visible**
+   on modern phones (a status without a duration is stored but never shown).
+2. `WAWebContactTextStatusBridge.setTextStatus(...)` — same mutation, helper route.
+3. `WAWebSetAboutJob.sendSetAbout(...)` — the legacy IQ. It saves the old About
+   field and may not appear on modern phones; the app logs when it has to use it.
+
+Reading your previous description uses the matching GraphQL text-status fetch, so
+the "restore" puts back exactly what your phone was showing.
+
+---
+
+## 8. Troubleshooting
+
+| | Windows | Android |
+|---|---|---|
+| **Nothing is detected** | Spotify must be *playing* and visible in the Windows media panel (`npm run test:media`) | Start playback once with the screen on; check **Activity log** in the app |
+| **Pairing code refused** | Codes expire in a few minutes: restart the app for a new one | Re-open the linking screen for a fresh code |
+| **Stopped updating overnight** | Check the tray UI is still running | Complete step 4 (battery exemption), plus your manufacturer's own "autostart" screen (on MIUI/HyperOS it is required even for the song reader, see §5) |
+| **The description stayed on a song** | Start the app again: auto-repair finishes the job | Same: auto-repair runs at the next start |
+| **Moving to another machine/phone** | The encrypted number/session belongs to your Windows account: delete `.secrets/` and `.wwebjs_auth/` and pair again | Unlink the device from WhatsApp and pair again |
+| **Detailed logs** | `app.log`, `app.err`, or `start.bat` for the live HUD | **Activity log** button in the app |
+
+---
+
+## 9. Disclaimer
+
+Both builds are **unofficial** and use WhatsApp Web the same way a browser does,
+to change **your own** profile fields only. They do not read chats, contacts or
+messages and do not message anyone. Automating your own account can, in principle,
+be against WhatsApp's terms of service: use it responsibly and at your own risk.
